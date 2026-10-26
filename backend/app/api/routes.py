@@ -1,4 +1,5 @@
 from datetime import date, datetime, time, timedelta, timezone
+import secrets
 from typing import Dict, List, Optional, Set
 from uuid import UUID
 
@@ -9,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import current_session, current_user
 from app.core.database import get_db
+from app.core.config import get_settings
 from app.core.security import create_access_token, hash_password, verify_password
 from app.models.entities import AuthSession, AvailabilityBlock, Category, FocusSession, Notification, Reminder, Task, TaskDependency, User
 from app.schemas.auth import LoginIn, RegisterIn, TokenOut, UserOut
@@ -407,6 +409,16 @@ def list_reminders(db: Session = Depends(get_db), user: User = Depends(current_u
     ).order_by(Task.deadline.asc()).limit(100).all())
     return [{"id":r.id,"task_id":t.id,"task_title":t.title,"deadline":t.deadline,"due_at":r.due_at,
              "status":r.status,"delivered_at":r.delivered_at,"timezone":user.timezone} for r,t in rows]
+
+
+@router.get("/internal/reminders/deliver", include_in_schema=False)
+def deliver_reminders_from_scheduler(authorization: Optional[str] = Header(None), db: Session = Depends(get_db)):
+    """Secret-protected endpoint for an external scheduler on serverless hosts."""
+    configured_secret = get_settings().reminder_cron_secret
+    expected = "Bearer {}".format(configured_secret) if configured_secret else ""
+    if not expected or not authorization or not secrets.compare_digest(authorization, expected):
+        raise HTTPException(status_code=401, detail="Scheduler authentication required")
+    return {"delivered": reminder_service.deliver_due_reminders(db)}
 
 
 @router.get("/notifications", response_model=List[NotificationOut])

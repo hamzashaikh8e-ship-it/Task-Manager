@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -39,6 +40,10 @@ app.include_router(router, prefix=settings.api_prefix)
 @app.on_event("startup")
 async def start_reminder_worker():
     global _reminder_task
+    # Vercel Functions are request-scoped/serverless; a background loop cannot be relied on.
+    if not settings.run_reminder_scheduler or os.environ.get("VERCEL") == "1":
+        logger.info("In-process reminder polling is disabled for this deployment")
+        return
     _reminder_task=asyncio.create_task(_reminder_loop())
 
 @app.on_event("shutdown")

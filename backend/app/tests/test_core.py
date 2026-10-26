@@ -1,6 +1,7 @@
 import os
 import tempfile
 import unittest
+from types import SimpleNamespace
 from datetime import date, timedelta
 from unittest.mock import patch
 
@@ -32,6 +33,26 @@ class CoreApiTests(unittest.TestCase):
         login = self.client.post("/api/v1/auth/login", json={"email": "session-security@example.com", "password": "correct-horse-battery"})
         self.assertEqual(login.status_code, 200)
         self.assertEqual(self.client.post("/api/v1/auth/login", json={"email": "session-security@example.com", "password": "wrong-password-value"}).status_code, 401)
+
+    def test_external_reminder_scheduler_endpoint_requires_secret_and_is_retry_safe(self):
+        secret = "scheduled-reminder-test-secret-value-123456"
+        with patch("app.api.routes.get_settings", return_value=SimpleNamespace(reminder_cron_secret=secret)), \
+             patch("app.api.routes.reminder_service.deliver_due_reminders", return_value=2) as deliver:
+            path = "/api/v1/internal/reminders/deliver"
+            self.assertEqual(self.client.get(path).status_code, 401)
+            self.assertEqual(self.client.get(path, headers={"Authorization": "Bearer wrong"}).status_code, 401)
+            response = self.client.get(path, headers={"Authorization": "Bearer " + secret})
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json(), {"delivered": 2})
+            deliver.assert_called_once()
+
+    def test_in_process_reminder_loop_is_not_started_in_vercel(self):
+        import asyncio
+        import app.main as main
+        main._reminder_task = None
+        with patch.dict(os.environ, {"VERCEL": "1"}):
+            asyncio.run(main.start_reminder_worker())
+        self.assertIsNone(main._reminder_task)
 
     def test_registration_task_crud_and_user_isolation(self):
         self.assertNotIn("/api/v1/ai/breakdown", self.client.get("/openapi.json").json()["paths"])

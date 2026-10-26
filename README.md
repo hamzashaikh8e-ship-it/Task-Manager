@@ -114,6 +114,57 @@ The current bearer token is stored in browser `localStorage`, so use HTTPS and d
 
 The FastAPI process polls for due reminders every 15 seconds. This needs no Redis or other external service for a single-instance deployment. Keep one API process running for scheduled delivery. Delivery records are deduplicated in the database. Use a dedicated single scheduler/worker before running multiple API instances.
 
+## Deploying to Vercel
+
+This repository is configured as **two Vercel projects** connected to the same GitHub repository: a static Vite frontend rooted at `frontend` and a FastAPI Python Function rooted at `backend`. Vercel's Python runtime supports FastAPI, but it is currently in beta. Vercel Functions are request-driven; do not rely on the local in-process reminder polling loop there.
+
+### 1. Provision PostgreSQL
+
+Create a hosted PostgreSQL database (for example, through a Vercel Marketplace provider or another managed PostgreSQL host). Copy its connection URL into the API project's server-side `DATABASE_URL` environment variable using the installed psycopg driver, in this form: `postgresql+psycopg://USER:PASSWORD@HOST:5432/DBNAME?sslmode=require`. Do not use the SQLite file on Vercel; function filesystems are not the persistent database.
+
+First create **both** Vercel projects from this repository and note their canonical `.vercel.app` domains. The frontend project uses root `frontend`; the API project uses root `backend`. Configure the API's CORS origin with the frontend domain and the frontend API URL with the API domain before the final deployments.
+
+### 2. Deploy the backend project
+
+In Vercel, import `hamzashaikh8e-ship-it/Task-Manager` as a new project and set **Root Directory** to `backend`. Vercel should detect FastAPI and read `backend/requirements.txt`; the Python version file pins 3.12. Set these environment variables for Production (and Preview separately only if you intend to use previews):
+
+- `APP_ENV=production`
+- `DATABASE_URL` to the managed PostgreSQL URL
+- `SECRET_KEY` to a unique random secret of at least 32 characters
+- `ACCESS_TOKEN_MINUTES=60`
+- `CORS_ORIGINS=https://<your-frontend-project>.vercel.app`
+- `ALLOWED_HOSTS=<your-api-project>.vercel.app`
+- `REMINDER_CRON_SECRET` to a unique random secret of at least 32 characters
+- `RUN_REMINDER_SCHEDULER=false`
+
+Production startup validates these settings and turns off FastAPI docs. Once the API project has a domain, use its exact hostname for `ALLOWED_HOSTS`; use the frontend's exact origin for `CORS_ORIGINS`. Keep all of these values in Vercel's server-side Environment Variables settings.
+
+### 3. Apply database migrations
+
+Run Alembic against the hosted database before sending users to the app. Use a trusted local terminal and load the backend production environment variables from your secret manager (Vercel CLI's `vercel env pull` can download them into an ignored local file after the project is linked; do not commit that file). At minimum, the shell needs `APP_ENV`, `DATABASE_URL`, `SECRET_KEY`, `CORS_ORIGINS`, `ALLOWED_HOSTS`, and `REMINDER_CRON_SECRET` because the production settings are validated during migration startup. From `backend`, run:
+
+```powershell
+$env:PYTHONPATH = (Get-Location).Path
+python -m pip install -r requirements.txt
+python -m alembic upgrade head
+```
+
+Never commit a pulled environment file or paste its values into chat. Rehearse upgrades on a staging database first and take a database backup.
+
+### 4. Deploy the frontend project
+
+Import the same GitHub repository a second time. Set **Root Directory** to `frontend`; the included `frontend/vercel.json` configures `pnpm install --frozen-lockfile`, `pnpm build`, and the `dist` output. Add the public build-time variable `VITE_API_URL=https://<your-api-project>.vercel.app/api/v1`, then deploy. This URL is public; do not put secrets in any `VITE_*` variable. Verify the final frontend origin exactly matches the API `CORS_ORIGINS` value.
+
+### 5. Schedule reminders outside the API request
+
+The API automatically skips its long-running reminder loop when running on Vercel. Configure a trusted external scheduler to request `GET https://<your-api-project>.vercel.app/api/v1/internal/reminders/deliver` every 1–5 minutes with header `Authorization: Bearer <REMINDER_CRON_SECRET>`. The endpoint rejects missing or incorrect secrets, and reminder delivery is idempotent. Do not place this secret in frontend settings. Vercel Hobby Cron supports only daily schedules, which is too infrequent for deadline reminders; use a scheduler that supports the desired interval or a plan/service that does.
+
+### 6. Verify the deployment
+
+Check `https://<your-api-project>.vercel.app/ready`, then register a test account, sign in, create and complete a task, refresh, and verify analytics and task state. Add a near-future reminder and confirm it appears after the next scheduler run. Do not point the production frontend at SQLite or commit production credentials.
+
+For Vercel's current Python runtime and FastAPI entrypoint behavior, see [Vercel Python Functions](https://vercel.com/docs/functions/runtimes/python) and [Deploy a FastAPI app on Vercel](https://vercel.com/docs/frameworks/backend/fastapi). For its scheduled job limits, see [Vercel Cron Jobs](https://vercel.com/docs/cron-jobs/manage-cron-jobs).
+
 ## Troubleshooting
 
 - **Browser cannot reach API:** ensure FastAPI is listening on port 8000 and the Vite proxy target is correct. For a separate production API, rebuild with the public `VITE_API_URL`.
