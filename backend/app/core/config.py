@@ -28,6 +28,16 @@ class Settings(BaseSettings):
     xp_focus_min_seconds: int = 300
     xp_level_size: int = 100
 
+    @validator("database_url", pre=True)
+    def normalize_postgres_driver(cls, value):
+        """Use the installed psycopg 3 driver for provider supplied PostgreSQL URLs."""
+        if isinstance(value, str):
+            if value.startswith("postgres://"):
+                return "postgresql+psycopg://" + value[len("postgres://"):]
+            if value.startswith("postgresql://"):
+                return "postgresql+psycopg://" + value[len("postgresql://"):]
+        return value
+
     @validator("app_env")
     def valid_app_env(cls, value):
         value = value.strip().lower()
