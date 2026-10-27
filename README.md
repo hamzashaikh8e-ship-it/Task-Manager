@@ -141,7 +141,7 @@ Production startup validates these settings and turns off FastAPI docs. Once the
 
 ### 3. Apply database migrations
 
-On Vercel, the backend runs the checked-in Alembic migrations on a production function's cold start before serving requests. PostgreSQL advisory locking prevents concurrent function instances from racing migrations. This uses migrations rather than `create_all` and is safe when repeated; later deploys only apply new revisions. For other hosting providers, apply Alembic as a separate release step using a trusted terminal and the server-side environment values. Rehearse upgrades on a staging database first and take a database backup.
+On Vercel, the backend runs the checked-in Alembic migrations during its Python build step, before API functions serve requests. PostgreSQL advisory locking prevents overlapping deployment builds from racing migrations. This uses migrations rather than `create_all` and is safe when repeated; later deploys only apply new revisions. The build uses Neon’s direct `DATABASE_URL_UNPOOLED` when available. For other hosting providers, apply Alembic as a separate release step using a trusted terminal and the server-side environment values. Rehearse upgrades on a staging database first and take a database backup.
 
 ```powershell
 $env:PYTHONPATH = (Get-Location).Path
