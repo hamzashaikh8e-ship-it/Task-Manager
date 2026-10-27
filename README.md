@@ -141,7 +141,7 @@ Production startup validates these settings and turns off FastAPI docs. Once the
 
 ### 3. Apply database migrations
 
-Run Alembic against the hosted database before sending users to the app. Use a trusted local terminal and load the backend production environment variables from your secret manager (Vercel CLI's `vercel env pull` can download them into an ignored local file after the project is linked; do not commit that file). At minimum, the shell needs `APP_ENV`, `DATABASE_URL`, `SECRET_KEY`, `CORS_ORIGINS`, `ALLOWED_HOSTS`, and `REMINDER_CRON_SECRET` because the production settings are validated during migration startup. From `backend`, run:
+On Vercel, the backend runs the checked-in Alembic migrations on a production function's cold start before serving requests. PostgreSQL advisory locking prevents concurrent function instances from racing migrations. This uses migrations rather than `create_all` and is safe when repeated; later deploys only apply new revisions. For other hosting providers, apply Alembic as a separate release step using a trusted terminal and the server-side environment values. Rehearse upgrades on a staging database first and take a database backup.
 
 ```powershell
 $env:PYTHONPATH = (Get-Location).Path
@@ -153,7 +153,7 @@ Never commit a pulled environment file or paste its values into chat. Rehearse u
 
 ### 4. Deploy the frontend project
 
-Import the same GitHub repository a second time. Set **Root Directory** to `frontend`; the included `frontend/vercel.json` configures `pnpm install --frozen-lockfile`, `pnpm build`, and the `dist` output. Add the public build-time variable `VITE_API_URL=https://<your-api-project>.vercel.app/api/v1`, then deploy. This URL is public; do not put secrets in any `VITE_*` variable. Verify the final frontend origin exactly matches the API `CORS_ORIGINS` value.
+Import the same GitHub repository a second time. Set **Root Directory** to `frontend`; the included `frontend/vercel.json` configures `pnpm install --frozen-lockfile`, `pnpm build`, the `dist` output, and a same-origin `/api/v1` rewrite to the backend project. The rewrite destination is the public API URL in that file. If you use a different API hostname, update the rewrite target and push the change. The browser uses the frontend origin, which must exactly match the API `CORS_ORIGINS` value.
 
 ### 5. Schedule reminders outside the API request
 

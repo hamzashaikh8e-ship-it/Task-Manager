@@ -9,6 +9,7 @@ from sqlalchemy import text
 from app.api.routes import router
 from app.core.config import get_settings
 from app.core.database import SessionLocal
+from app.core.migrations import run_database_migrations
 from app.services.reminders import deliver_due_reminders
 
 settings = get_settings()
@@ -40,6 +41,12 @@ app.include_router(router, prefix=settings.api_prefix)
 @app.on_event("startup")
 async def start_reminder_worker():
     global _reminder_task
+    # Vercel doesn't provide a shell hook for database migrations. Apply the
+    # checked-in Alembic revisions on cold start before serving production API
+    # requests; the migration service serializes concurrent instances.
+    if production and os.environ.get("VERCEL") == "1":
+        await asyncio.to_thread(run_database_migrations)
+
     # Vercel Functions are request-scoped/serverless; a background loop cannot be relied on.
     if not settings.run_reminder_scheduler or os.environ.get("VERCEL") == "1":
         logger.info("In-process reminder polling is disabled for this deployment")
